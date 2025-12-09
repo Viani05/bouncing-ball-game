@@ -9,1053 +9,795 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { margin: 0; padding: 0; }
+        body { margin: 0; padding: 0; overflow: hidden; }
     </style>
 </head>
 <body>
     <div id="root"></div>
     
     <script type="text/babel">
-        import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Volume2, VolumeX, Trophy, Star } from 'lucide-react';
+        const { useState, useEffect, useRef } = React;
 
-const BouncingBallGame = () => {
-  const canvasRef = useRef(null);
-  const [gameState, setGameState] = useState('menu'); // menu, playing, paused, gameover
-  const [score, setScore] = useState(0);
-  const [highScore, setHighScore] = useState(0);
-  const [level, setLevel] = useState(1);
-  const [lives, setLives] = useState(7);
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [combo, setCombo] = useState(0);
-  const [maxCombo, setMaxCombo] = useState(0);
-  const gameLoop = useRef(null);
-  const audioContext = useRef(null);
+        // Icons as SVG components
+        const Play = ({ size = 24, fill = "currentColor" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+        );
 
-  // Game constants
-  const CANVAS_WIDTH = 800;
-  const CANVAS_HEIGHT = 600;
-  const BALL_RADIUS = 20;
-  const GRAVITY = 0.5;
-  const BOUNCE_FORCE = -13;
-  const BASE_SPEED = 2.5;
+        const Pause = ({ size = 24 }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="6" y="4" width="4" height="16"></rect>
+                <rect x="14" y="4" width="4" height="16"></rect>
+            </svg>
+        );
 
-  // Game state refs
-  const ball = useRef({
-    x: 150,
-    y: CANVAS_HEIGHT / 2,
-    vy: 0,
-    squash: 1,
-    rotation: 0
-  });
+        const Volume2 = ({ size = 24 }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+            </svg>
+        );
 
-  const obstacles = useRef([]);
-  const coins = useRef([]);
-  const particles = useRef([]);
-  const powerups = useRef([]);
-  const scorePopups = useRef([]);
-  const trailParticles = useRef([]);
-  const gameSpeed = useRef(BASE_SPEED);
-  const distance = useRef(0);
-  const currentTheme = useRef(0);
-  const comboTimer = useRef(0);
-  const shakeAmount = useRef(0);
-  const activePowerup = useRef(null);
-  const powerupTimer = useRef(0);
-  const invincibilityTimer = useRef(0); // Prevent multiple hits at once
+        const VolumeX = ({ size = 24 }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <line x1="23" y1="9" x2="17" y2="15"></line>
+                <line x1="17" y1="9" x2="23" y2="15"></line>
+            </svg>
+        );
 
-  // Load high score from storage
-  useEffect(() => {
-    const loadHighScore = async () => {
-      try {
-        const result = await window.storage.get('bouncing_ball_highscore');
-        if (result && result.value) {
-          setHighScore(parseInt(result.value));
-        }
-      } catch (e) {
-        console.log('No high score found');
-      }
-    };
-    loadHighScore();
-  }, []);
+        const Trophy = ({ size = 24 }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
+                <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+                <path d="M4 22h16"></path>
+                <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path>
+                <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path>
+                <path d="M18 2H6v7a6 6 0 0 0 12 0V2z"></path>
+            </svg>
+        );
 
-  // Save high score
-  const saveHighScore = async (newScore) => {
-    try {
-      await window.storage.set('bouncing_ball_highscore', newScore.toString());
-    } catch (e) {
-      console.log('Could not save high score');
-    }
-  };
+        const BouncingBallGame = () => {
+            const canvasRef = useRef(null);
+            const [gameState, setGameState] = useState('menu');
+            const [score, setScore] = useState(0);
+            const [highScore, setHighScore] = useState(0);
+            const [level, setLevel] = useState(1);
+            const [lives, setLives] = useState(7);
+            const [soundEnabled, setSoundEnabled] = useState(true);
+            const [combo, setCombo] = useState(0);
+            const [maxCombo, setMaxCombo] = useState(0);
+            const gameLoop = useRef(null);
+            const audioContext = useRef(null);
 
-  // Themes
-  const themes = [
-    { name: 'Brick', bg: '#8B4513', wall: '#A0522D', accent: '#D2691E', spike: '#696969' },
-    { name: 'Grassland', bg: '#87CEEB', wall: '#228B22', accent: '#90EE90', spike: '#8B4513' },
-    { name: 'Volcano', bg: '#8B0000', wall: '#B22222', accent: '#FF4500', spike: '#000000' },
-    { name: 'Ice Cave', bg: '#4682B4', wall: '#B0E0E6', accent: '#E0FFFF', spike: '#4169E1' },
-    { name: 'Steel', bg: '#2F4F4F', wall: '#708090', accent: '#C0C0C0', spike: '#36454F' }
-  ];
+            const CANVAS_WIDTH = 800;
+            const CANVAS_HEIGHT = 600;
+            const BALL_RADIUS = 20;
+            const GRAVITY = 0.5;
+            const BOUNCE_FORCE = -13;
+            const BASE_SPEED = 2.5;
 
-  // Sound generation
-  const playSound = (type, pitch = 1) => {
-    if (!soundEnabled) return;
-    
-    try {
-      if (!audioContext.current) {
-        audioContext.current = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      
-      const ctx = audioContext.current;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      
-      switch(type) {
-        case 'bounce':
-          osc.frequency.setValueAtTime(300 * pitch, ctx.currentTime);
-          osc.frequency.exponentialRampToValueAtTime(150 * pitch, ctx.currentTime + 0.1);
-          gain.gain.setValueAtTime(0.3, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-          osc.start(ctx.currentTime);
-          osc.stop(ctx.currentTime + 0.1);
-          break;
-        case 'coin':
-          osc.frequency.setValueAtTime(800 * pitch, ctx.currentTime);
-          osc.frequency.exponentialRampToValueAtTime(1200 * pitch, ctx.currentTime + 0.1);
-          gain.gain.setValueAtTime(0.2, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-          osc.start(ctx.currentTime);
-          osc.stop(ctx.currentTime + 0.1);
-          break;
-        case 'hit':
-          osc.type = 'sawtooth';
-          osc.frequency.setValueAtTime(100, ctx.currentTime);
-          gain.gain.setValueAtTime(0.3, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
-          osc.start(ctx.currentTime);
-          osc.stop(ctx.currentTime + 0.2);
-          break;
-        case 'powerup':
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(400, ctx.currentTime);
-          osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.2);
-          gain.gain.setValueAtTime(0.3, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
-          osc.start(ctx.currentTime);
-          osc.stop(ctx.currentTime + 0.2);
-          break;
-        case 'levelup':
-          osc.frequency.setValueAtTime(523, ctx.currentTime);
-          osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
-          osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
-          gain.gain.setValueAtTime(0.3, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-          osc.start(ctx.currentTime);
-          osc.stop(ctx.currentTime + 0.3);
-          break;
-      }
-    } catch (e) {
-      console.log('Audio not supported');
-    }
-  };
+            const ball = useRef({ x: 150, y: CANVAS_HEIGHT / 2, vy: 0, squash: 1, rotation: 0 });
+            const obstacles = useRef([]);
+            const coins = useRef([]);
+            const particles = useRef([]);
+            const powerups = useRef([]);
+            const scorePopups = useRef([]);
+            const trailParticles = useRef([]);
+            const gameSpeed = useRef(BASE_SPEED);
+            const distance = useRef(0);
+            const currentTheme = useRef(0);
+            const comboTimer = useRef(0);
+            const shakeAmount = useRef(0);
+            const activePowerup = useRef(null);
+            const powerupTimer = useRef(0);
+            const invincibilityTimer = useRef(0);
 
-  // Initialize game
-  const initGame = () => {
-    ball.current = {
-      x: 150,
-      y: CANVAS_HEIGHT / 2,
-      vy: 0,
-      squash: 1,
-      rotation: 0
-    };
-    obstacles.current = [];
-    coins.current = [];
-    particles.current = [];
-    powerups.current = [];
-    scorePopups.current = [];
-    trailParticles.current = [];
-    distance.current = 0;
-    gameSpeed.current = BASE_SPEED + (level - 1) * 0.3;
-    currentTheme.current = Math.floor((level - 1) / 5) % themes.length;
-    comboTimer.current = 0;
-    shakeAmount.current = 0;
-    activePowerup.current = null;
-    powerupTimer.current = 0;
-    invincibilityTimer.current = 0;
-    
-    // Generate initial obstacles
-    for (let i = 0; i < 3; i++) {
-      generateObstacle(CANVAS_WIDTH + i * 400);
-    }
-  };
+            const themes = [
+                { name: 'Brick', bg: '#8B4513', wall: '#A0522D', accent: '#D2691E', spike: '#696969' },
+                { name: 'Grassland', bg: '#87CEEB', wall: '#228B22', accent: '#90EE90', spike: '#8B4513' },
+                { name: 'Volcano', bg: '#8B0000', wall: '#B22222', accent: '#FF4500', spike: '#000000' },
+                { name: 'Ice Cave', bg: '#4682B4', wall: '#B0E0E6', accent: '#E0FFFF', spike: '#4169E1' },
+                { name: 'Steel', bg: '#2F4F4F', wall: '#708090', accent: '#C0C0C0', spike: '#36454F' }
+            ];
 
-  // Generate obstacles
-  const generateObstacle = (x) => {
-    const type = Math.random();
-    const theme = themes[currentTheme.current];
-    
-    if (type < 0.4) {
-      // Ground spikes
-      obstacles.current.push({
-        x,
-        y: CANVAS_HEIGHT - 70,
-        width: 50,
-        height: 50,
-        type: 'ground_spike',
-        color: theme.spike
-      });
-    } else if (type < 0.7) {
-      // Water gap
-      obstacles.current.push({
-        x,
-        y: CANVAS_HEIGHT - 40,
-        width: 80 + level * 3,
-        height: 40,
-        type: 'water',
-        color: '#4169E1'
-      });
-    } else {
-      // Bomb obstacle
-      obstacles.current.push({
-        x,
-        y: CANVAS_HEIGHT / 2,
-        width: 50,
-        height: 50,
-        type: 'bomb',
-        yOffset: 0,
-        speed: 1.0,
-        range: 100,
-        fuseGlow: 0,
-        color: theme.spike
-      });
-    }
-    
-    // Add coins
-    if (Math.random() > 0.2) {
-      coins.current.push({
-        x: x + 100,
-        y: 150 + Math.random() * 200,
-        radius: 15,
-        collected: false,
-        sparkle: 0
-      });
-    }
-    
-    // Add powerups occasionally
-    if (Math.random() > 0.85) {
-      const powerupTypes = ['shield', 'magnet'];
-      const selectedType = powerupTypes[Math.floor(Math.random() * powerupTypes.length)];
-      powerups.current.push({
-        x: x + 150,
-        y: 150 + Math.random() * 200,
-        radius: 20,
-        type: selectedType,
-        collected: false,
-        float: 0
-      });
-    }
-  };
+            useEffect(() => {
+                const saved = localStorage.getItem('bouncing_ball_highscore');
+                if (saved) setHighScore(parseInt(saved));
+            }, []);
 
-  // Create particle effect
-  const createParticles = (x, y, color, count = 8) => {
-    for (let i = 0; i < count; i++) {
-      particles.current.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * 8,
-        vy: (Math.random() - 0.5) * 8,
-        life: 30,
-        color
-      });
-    }
-  };
+            const saveHighScore = (newScore) => {
+                localStorage.setItem('bouncing_ball_highscore', newScore.toString());
+            };
 
-  // Create trail particles
-  const createTrailParticle = (x, y) => {
-    trailParticles.current.push({
-      x,
-      y,
-      life: 20,
-      size: BALL_RADIUS
-    });
-  };
+            const playSound = (type, pitch = 1) => {
+                if (!soundEnabled) return;
+                try {
+                    if (!audioContext.current) {
+                        audioContext.current = new (window.AudioContext || window.webkitAudioContext)();
+                    }
+                    const ctx = audioContext.current;
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
 
-  // Create score popup
-  const createScorePopup = (x, y, points, multiplier) => {
-    scorePopups.current.push({
-      x,
-      y,
-      text: multiplier > 1 ? `+${points} x${multiplier}` : `+${points}`,
-      life: 60,
-      vy: -2
-    });
-  };
+                    switch(type) {
+                        case 'bounce':
+                            osc.frequency.setValueAtTime(300 * pitch, ctx.currentTime);
+                            osc.frequency.exponentialRampToValueAtTime(150 * pitch, ctx.currentTime + 0.1);
+                            gain.gain.setValueAtTime(0.3, ctx.currentTime);
+                            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+                            osc.start(ctx.currentTime);
+                            osc.stop(ctx.currentTime + 0.1);
+                            break;
+                        case 'coin':
+                            osc.frequency.setValueAtTime(800 * pitch, ctx.currentTime);
+                            osc.frequency.exponentialRampToValueAtTime(1200 * pitch, ctx.currentTime + 0.1);
+                            gain.gain.setValueAtTime(0.2, ctx.currentTime);
+                            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+                            osc.start(ctx.currentTime);
+                            osc.stop(ctx.currentTime + 0.1);
+                            break;
+                        case 'hit':
+                            osc.type = 'sawtooth';
+                            osc.frequency.setValueAtTime(100, ctx.currentTime);
+                            gain.gain.setValueAtTime(0.3, ctx.currentTime);
+                            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
+                            osc.start(ctx.currentTime);
+                            osc.stop(ctx.currentTime + 0.2);
+                            break;
+                        case 'powerup':
+                            osc.frequency.setValueAtTime(400, ctx.currentTime);
+                            osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.2);
+                            gain.gain.setValueAtTime(0.3, ctx.currentTime);
+                            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
+                            osc.start(ctx.currentTime);
+                            osc.stop(ctx.currentTime + 0.2);
+                            break;
+                        case 'levelup':
+                            osc.frequency.setValueAtTime(523, ctx.currentTime);
+                            gain.gain.setValueAtTime(0.3, ctx.currentTime);
+                            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+                            osc.start(ctx.currentTime);
+                            osc.stop(ctx.currentTime + 0.3);
+                            break;
+                    }
+                } catch (e) {
+                    console.log('Audio not supported');
+                }
+            };
 
-  // Game update loop
-  const update = () => {
-    if (gameState !== 'playing') return;
+            const initGame = () => {
+                ball.current = { x: 150, y: CANVAS_HEIGHT / 2, vy: 0, squash: 1, rotation: 0 };
+                obstacles.current = [];
+                coins.current = [];
+                particles.current = [];
+                powerups.current = [];
+                scorePopups.current = [];
+                trailParticles.current = [];
+                distance.current = 0;
+                gameSpeed.current = BASE_SPEED;
+                currentTheme.current = 0;
+                comboTimer.current = 0;
+                shakeAmount.current = 0;
+                activePowerup.current = null;
+                powerupTimer.current = 0;
+                invincibilityTimer.current = 0;
+                for (let i = 0; i < 3; i++) {
+                    generateObstacle(CANVAS_WIDTH + i * 400);
+                }
+            };
 
-    const b = ball.current;
-    
-    // Apply gravity
-    b.vy += GRAVITY;
-    b.y += b.vy;
-    b.rotation += gameSpeed.current * 0.1;
-    
-    // Create trail particles
-    if (Math.random() > 0.7) {
-      createTrailParticle(b.x, b.y);
-    }
-    
-    // Ground collision
-    if (b.y > CANVAS_HEIGHT - 50 - BALL_RADIUS) {
-      b.y = CANVAS_HEIGHT - 50 - BALL_RADIUS;
-      b.vy = 0;
-      b.squash = 0.7;
-    } else {
-      b.squash = Math.min(1, b.squash + 0.05);
-    }
-    
-    // Update shake
-    if (shakeAmount.current > 0) {
-      shakeAmount.current -= 0.5;
-    }
-    
-    // Update combo timer
-    if (comboTimer.current > 0) {
-      comboTimer.current--;
-    } else if (combo > 0) {
-      setCombo(0);
-    }
-    
-    // Update powerup timer
-    if (activePowerup.current && powerupTimer.current > 0) {
-      powerupTimer.current--;
-    } else if (activePowerup.current) {
-      activePowerup.current = null;
-    }
-    
-    // Update invincibility timer
-    if (invincibilityTimer.current > 0) {
-      invincibilityTimer.current--;
-    }
-    
-    // Update distance and level
-    distance.current += gameSpeed.current;
-    const newLevel = Math.floor(distance.current / 3000) + 1;
-    if (newLevel > level) {
-      setLevel(newLevel);
-      playSound('levelup');
-      gameSpeed.current = BASE_SPEED + (newLevel - 1) * 0.2;
-      const newTheme = Math.floor((newLevel - 1) / 5) % themes.length;
-      
-      // Refill lives when background changes
-      if (newTheme !== currentTheme.current) {
-        setLives(7);
-        currentTheme.current = newTheme;
-        createParticles(b.x, b.y, '#00FF00', 20);
-      }
-    }
-    
-    // Update obstacles
-    obstacles.current = obstacles.current.filter(obs => {
-      obs.x -= gameSpeed.current;
-      
-      if (obs.type === 'bomb') {
-        obs.yOffset += obs.speed;
-        if (Math.abs(obs.yOffset) > obs.range) obs.speed *= -1;
-        obs.fuseGlow = (obs.fuseGlow + 0.15) % (Math.PI * 2);
-      }
-      
-      // Check collision
-      const obsY = obs.y + (obs.yOffset || 0);
-      if (obs.x < b.x + BALL_RADIUS && obs.x + obs.width > b.x - BALL_RADIUS &&
-          obsY < b.y + BALL_RADIUS && obsY + obs.height > b.y - BALL_RADIUS) {
-        if (obs.type !== 'water') {
-          // Check if shielded
-          if (activePowerup.current === 'shield') {
-            playSound('bounce', 1.5);
-            createParticles(b.x, b.y, '#00FFFF', 15);
-            return false; // Destroy obstacle
-          } else if (invincibilityTimer.current === 0) {
-            // Only take damage if not invincible
-            playSound('hit');
-            createParticles(b.x, b.y, '#FF0000');
-            shakeAmount.current = 10;
-            setCombo(0);
-            comboTimer.current = 0;
-            invincibilityTimer.current = 90; // 1.5 seconds of invincibility after hit
-            
-            setLives(prev => {
-              const newLives = prev - 1;
-              if (newLives <= 0) {
-                setGameState('gameover');
-                return 0;
-              }
-              return newLives;
-            });
-            
-            b.y = CANVAS_HEIGHT / 2;
-            b.vy = 0;
-            return false; // Remove the obstacle that hit us
-          }
-        }
-      }
-      
-      return obs.x > -obs.width;
-    });
-    
-    // Generate new obstacles
-    if (obstacles.current.length < 5) {
-      generateObstacle(CANVAS_WIDTH + 200);
-    }
-    
-    // Update coins
-    coins.current = coins.current.filter(coin => {
-      coin.x -= gameSpeed.current;
-      coin.sparkle = (coin.sparkle + 0.1) % (Math.PI * 2);
-      
-      if (!coin.collected) {
-        const dx = coin.x - b.x;
-        const dy = coin.y - b.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        
-        // Magnet effect
-        if (activePowerup.current === 'magnet' && dist < 150) {
-          coin.x += (b.x - coin.x) * 0.1;
-          coin.y += (b.y - coin.y) * 0.1;
-        }
-        
-        if (dist < BALL_RADIUS + coin.radius) {
-          coin.collected = true;
-          const newCombo = combo + 1;
-          setCombo(newCombo);
-          if (newCombo > maxCombo) setMaxCombo(newCombo);
-          comboTimer.current = 120;
-          
-          const multiplier = Math.min(Math.floor(newCombo / 3) + 1, 5);
-          const points = 10 * multiplier;
-          
-          playSound('coin', 1 + newCombo * 0.1);
-          createParticles(coin.x, coin.y, '#FFD700');
-          createScorePopup(coin.x, coin.y, 10, multiplier);
-          setScore(prev => prev + points);
-        }
-      }
-      
-      return coin.x > -coin.radius && !coin.collected;
-    });
-    
-    // Update powerups
-    powerups.current = powerups.current.filter(powerup => {
-      powerup.x -= gameSpeed.current;
-      powerup.float = (powerup.float + 0.1) % (Math.PI * 2);
-      
-      if (!powerup.collected) {
-        const dx = powerup.x - b.x;
-        const dy = powerup.y - b.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        
-        if (dist < BALL_RADIUS + powerup.radius) {
-          powerup.collected = true;
-          activePowerup.current = powerup.type;
-          powerupTimer.current = 300; // 5 seconds
-          playSound('powerup');
-          createParticles(powerup.x, powerup.y, powerup.type === 'shield' ? '#00FFFF' : '#FF00FF', 15);
-        }
-      }
-      
-      return powerup.x > -powerup.radius && !powerup.collected;
-    });
-    
-    // Update particles
-    particles.current = particles.current.filter(p => {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.vy += 0.3;
-      p.life--;
-      return p.life > 0;
-    });
-    
-    // Update trail particles
-    trailParticles.current = trailParticles.current.filter(p => {
-      p.life--;
-      p.size -= 0.5;
-      return p.life > 0 && p.size > 0;
-    });
-    
-    // Update score popups
-    scorePopups.current = scorePopups.current.filter(p => {
-      p.y += p.vy;
-      p.life--;
-      return p.life > 0;
-    });
-  };
+            const generateObstacle = (x) => {
+                const type = Math.random();
+                const theme = themes[currentTheme.current];
+                if (type < 0.4) {
+                    obstacles.current.push({ x, y: CANVAS_HEIGHT - 70, width: 50, height: 50, type: 'ground_spike', color: theme.spike });
+                } else if (type < 0.7) {
+                    obstacles.current.push({ x, y: CANVAS_HEIGHT - 40, width: 80 + level * 3, height: 40, type: 'water', color: '#4169E1' });
+                } else {
+                    obstacles.current.push({ x, y: CANVAS_HEIGHT / 2, width: 50, height: 50, type: 'bomb', yOffset: 0, speed: 1.0, range: 100, fuseGlow: 0, color: theme.spike });
+                }
+                if (Math.random() > 0.2) {
+                    coins.current.push({ x: x + 100, y: 150 + Math.random() * 200, radius: 15, collected: false, sparkle: 0 });
+                }
+                if (Math.random() > 0.85) {
+                    const powerupTypes = ['shield', 'magnet'];
+                    const selectedType = powerupTypes[Math.floor(Math.random() * powerupTypes.length)];
+                    powerups.current.push({ x: x + 150, y: 150 + Math.random() * 200, radius: 20, type: selectedType, collected: false, float: 0 });
+                }
+            };
 
-  // Draw game
-  const draw = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    const theme = themes[currentTheme.current];
-    
-    // Apply screen shake
-    ctx.save();
-    if (shakeAmount.current > 0) {
-      ctx.translate(
-        (Math.random() - 0.5) * shakeAmount.current,
-        (Math.random() - 0.5) * shakeAmount.current
-      );
-    }
-    
-    // Background
-    const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-    gradient.addColorStop(0, theme.bg);
-    gradient.addColorStop(1, theme.accent);
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    
-    // Background animations based on theme
-    if (currentTheme.current === 2) { // Volcano - lava bubbles
-      for (let i = 0; i < 5; i++) {
-        const bubbleX = ((distance.current * 0.5 + i * 150) % CANVAS_WIDTH);
-        const bubbleY = CANVAS_HEIGHT - 50 + Math.sin(distance.current * 0.05 + i) * 10;
-        ctx.fillStyle = 'rgba(255, 69, 0, 0.3)';
-        ctx.beginPath();
-        ctx.arc(bubbleX, bubbleY, 15, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    } else if (currentTheme.current === 3) { // Ice - falling snow
-      for (let i = 0; i < 20; i++) {
-        const snowX = ((distance.current * 0.3 + i * 40) % CANVAS_WIDTH);
-        const snowY = ((distance.current * 0.5 + i * 30) % CANVAS_HEIGHT);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-        ctx.beginPath();
-        ctx.arc(snowX, snowY, 3, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-    
-    // Tunnel walls with perspective
-    ctx.fillStyle = theme.wall;
-    ctx.fillRect(0, 0, CANVAS_WIDTH, 50);
-    ctx.fillRect(0, CANVAS_HEIGHT - 50, CANVAS_WIDTH, 50);
-    
-    // Tunnel lines for depth
-    ctx.strokeStyle = theme.accent;
-    ctx.lineWidth = 2;
-    for (let i = 0; i < 10; i++) {
-      const x = (distance.current % 100) + i * 100;
-      ctx.beginPath();
-      ctx.moveTo(x, 50);
-      ctx.lineTo(x, CANVAS_HEIGHT - 50);
-      ctx.stroke();
-    }
-    
-    // Draw trail particles
-    trailParticles.current.forEach(p => {
-      ctx.fillStyle = `rgba(255, 107, 107, ${p.life / 20 * 0.3})`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    
-    // Draw obstacles
-    obstacles.current.forEach(obs => {
-      ctx.fillStyle = obs.color;
-      const obsY = obs.y + (obs.yOffset || 0);
-      
-      if (obs.type === 'ground_spike') {
-        ctx.beginPath();
-        for (let i = 0; i < 3; i++) {
-          const baseX = obs.x + i * 20;
-          ctx.moveTo(baseX, obsY + obs.height);
-          ctx.lineTo(baseX + 10, obsY);
-          ctx.lineTo(baseX + 20, obsY + obs.height);
-        }
-        ctx.fill();
-      } else if (obs.type === 'water') {
-        ctx.fillStyle = obs.color;
-        ctx.globalAlpha = 0.6;
-        ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = '#87CEEB';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        for (let i = 0; i < obs.width; i += 10) {
-          ctx.lineTo(obs.x + i, obs.y + Math.sin((distance.current + i) * 0.1) * 5);
-        }
-        ctx.stroke();
-      } else if (obs.type === 'bomb') {
-        const centerX = obs.x + obs.width / 2;
-        const centerY = obsY + obs.height / 2;
-        
-        ctx.fillStyle = '#1a1a1a';
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, 22, 0, Math.PI * 2);
-        ctx.fill();
-        
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-        ctx.beginPath();
-        ctx.arc(centerX - 8, centerY - 8, 8, 0, Math.PI * 2);
-        ctx.fill();
-        
-        ctx.strokeStyle = '#8B4513';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(centerX - 5, centerY - 22);
-        ctx.lineTo(centerX - 8, centerY - 32);
-        ctx.stroke();
-        
-        const glowIntensity = Math.sin(obs.fuseGlow) * 0.5 + 0.5;
-        const sparkGrad = ctx.createRadialGradient(centerX - 8, centerY - 32, 0, centerX - 8, centerY - 32, 8);
-        sparkGrad.addColorStop(0, `rgba(255, 100, 0, ${glowIntensity})`);
-        sparkGrad.addColorStop(0.5, `rgba(255, 200, 0, ${glowIntensity * 0.7})`);
-        sparkGrad.addColorStop(1, 'rgba(255, 200, 0, 0)');
-        ctx.fillStyle = sparkGrad;
-        ctx.beginPath();
-        ctx.arc(centerX - 8, centerY - 32, 8, 0, Math.PI * 2);
-        ctx.fill();
-        
-        if (Math.random() > 0.7) {
-          ctx.fillStyle = '#FFA500';
-          ctx.beginPath();
-          ctx.arc(centerX - 8 + (Math.random() - 0.5) * 6, centerY - 32 - Math.random() * 4, 2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        
-        ctx.fillStyle = '#FF0000';
-        ctx.font = 'bold 16px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('💣', centerX, centerY);
-      }
-    });
-    
-    // Draw coins
-    coins.current.forEach(coin => {
-      const glowSize = Math.sin(coin.sparkle) * 5 + coin.radius;
-      
-      const glow = ctx.createRadialGradient(coin.x, coin.y, 0, coin.x, coin.y, glowSize + 10);
-      glow.addColorStop(0, 'rgba(255, 215, 0, 0.8)');
-      glow.addColorStop(1, 'rgba(255, 215, 0, 0)');
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(coin.x, coin.y, glowSize + 10, 0, Math.PI * 2);
-      ctx.fill();
-      
-      ctx.fillStyle = '#FFD700';
-      ctx.beginPath();
-      ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#FFA500';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-      
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-      ctx.beginPath();
-      ctx.arc(coin.x - 5, coin.y - 5, 5, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    
-    // Draw powerups
-    powerups.current.forEach(powerup => {
-      const floatY = powerup.y + Math.sin(powerup.float) * 10;
-      
-      const glow = ctx.createRadialGradient(powerup.x, floatY, 0, powerup.x, floatY, powerup.radius + 10);
-      if (powerup.type === 'shield') {
-        glow.addColorStop(0, 'rgba(0, 255, 255, 0.8)');
-        glow.addColorStop(1, 'rgba(0, 255, 255, 0)');
-      } else {
-        glow.addColorStop(0, 'rgba(255, 0, 255, 0.8)');
-        glow.addColorStop(1, 'rgba(255, 0, 255, 0)');
-      }
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(powerup.x, floatY, powerup.radius + 10, 0, Math.PI * 2);
-      ctx.fill();
-      
-      ctx.fillStyle = powerup.type === 'shield' ? '#00FFFF' : '#FF00FF';
-      ctx.beginPath();
-      ctx.arc(powerup.x, floatY, powerup.radius, 0, Math.PI * 2);
-      ctx.fill();
-      
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 20px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(powerup.type === 'shield' ? '🛡️' : '🧲', powerup.x, floatY);
-    });
-    
-    // Draw particles
-    particles.current.forEach(p => {
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = p.life / 30;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    });
-    
-    // Draw score popups
-    scorePopups.current.forEach(p => {
-      ctx.fillStyle = '#FFD700';
-      ctx.globalAlpha = p.life / 60;
-      ctx.font = 'bold 20px Arial';
-      ctx.textAlign = 'center';
-      ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 3;
-      ctx.strokeText(p.text, p.x, p.y);
-      ctx.fillText(p.text, p.x, p.y);
-      ctx.globalAlpha = 1;
-    });
-    
-    // Draw ball
-    const b = ball.current;
-    ctx.save();
-    ctx.translate(b.x, b.y);
-    ctx.scale(1, b.squash);
-    ctx.rotate(b.rotation);
-    
-    // Shield effect
-    if (activePowerup.current === 'shield') {
-      const shieldGrad = ctx.createRadialGradient(0, 0, BALL_RADIUS, 0, 0, BALL_RADIUS + 15);
-      shieldGrad.addColorStop(0, 'rgba(0, 255, 255, 0)');
-      shieldGrad.addColorStop(1, 'rgba(0, 255, 255, 0.5)');
-      ctx.fillStyle = shieldGrad;
-      ctx.beginPath();
-      ctx.arc(0, 0, BALL_RADIUS + 15, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    
-    // Invincibility flashing effect
-    if (invincibilityTimer.current > 0 && Math.floor(invincibilityTimer.current / 10) % 2 === 0) {
-      ctx.globalAlpha = 0.5;
-    }
-    
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-    ctx.beginPath();
-    ctx.arc(5, 5, BALL_RADIUS, 0, Math.PI * 2);
-    ctx.fill();
-    
-    const ballGrad = ctx.createRadialGradient(-5, -5, 5, 0, 0, BALL_RADIUS);
-    ballGrad.addColorStop(0, '#FF6B6B');
-    ballGrad.addColorStop(1, '#C92A2A');
-    ctx.fillStyle = ballGrad;
-    ctx.beginPath();
-    ctx.arc(0, 0, BALL_RADIUS, 0, Math.PI * 2);
-    ctx.fill();
-    
-    ctx.strokeStyle = '#8B0000';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(0, 0, BALL_RADIUS - 5, Math.PI * 0.3, Math.PI * 0.7);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(0, 0, BALL_RADIUS - 5, Math.PI * 1.3, Math.PI * 1.7);
-    ctx.stroke();
-    
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.beginPath();
-    ctx.arc(-8, -8, 8, 0, Math.PI * 2);
-    ctx.fill();
-    
-    ctx.globalAlpha = 1; // Reset alpha
-    ctx.restore();
-    
-    // Draw combo indicator
-    if (combo > 2) {
-      const multiplier = Math.min(Math.floor(combo / 3) + 1, 5);
-      ctx.fillStyle = '#FFD700';
-      ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 3;
-      ctx.font = 'bold 32px Arial';
-      ctx.textAlign = 'left';
-      ctx.strokeText(`${multiplier}x COMBO!`, 20, 100);
-      ctx.fillText(`${multiplier}x COMBO!`, 20, 100);
-      
-      ctx.font = 'bold 20px Arial';
-      const comboBarWidth = 200;
-      const comboBarFill = (comboTimer.current / 120) * comboBarWidth;
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-      ctx.fillRect(20, 110, comboBarWidth, 10);
-      ctx.fillStyle = '#FFD700';
-      ctx.fillRect(20, 110, comboBarFill, 10);
-    }
-    
-    // Draw powerup indicator
-    if (activePowerup.current) {
-      const powerupBarWidth = 150;
-      const powerupBarFill = (powerupTimer.current / 300) * powerupBarWidth;
-      
-      ctx.fillStyle = activePowerup.current === 'shield' ? '#00FFFF' : '#FF00FF';
-      ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 2;
-      ctx.font = 'bold 20px Arial';
-      ctx.textAlign = 'right';
-      const powerupText = activePowerup.current === 'shield' ? '🛡️ SHIELD' : '🧲 MAGNET';
-      ctx.strokeText(powerupText, CANVAS_WIDTH - 20, 100);
-      ctx.fillText(powerupText, CANVAS_WIDTH - 20, 100);
-      
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-      ctx.fillRect(CANVAS_WIDTH - 170, 110, powerupBarWidth, 10);
-      ctx.fillStyle = activePowerup.current === 'shield' ? '#00FFFF' : '#FF00FF';
-      ctx.fillRect(CANVAS_WIDTH - 170, 110, powerupBarFill, 10);
-    }
-    
-    // Progress bar to next level
-    const levelProgress = (distance.current % 3000) / 3000;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(50, CANVAS_HEIGHT - 30, CANVAS_WIDTH - 100, 15);
-    ctx.fillStyle = '#00FF00';
-    ctx.fillRect(50, CANVAS_HEIGHT - 30, (CANVAS_WIDTH - 100) * levelProgress, 15);
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(50, CANVAS_HEIGHT - 30, CANVAS_WIDTH - 100, 15);
-    
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 12px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(`LEVEL ${level} - ${Math.floor(levelProgress * 100)}%`, CANVAS_WIDTH / 2, CANVAS_HEIGHT - 18);
-    
-    ctx.restore();
-  };
+            const createParticles = (x, y, color, count = 8) => {
+                for (let i = 0; i < count; i++) {
+                    particles.current.push({ x, y, vx: (Math.random() - 0.5) * 8, vy: (Math.random() - 0.5) * 8, life: 30, color });
+                }
+            };
 
-  // Handle click/tap
-  const handleBounce = () => {
-    if (gameState === 'playing') {
-      const b = ball.current;
-      if (b.y >= CANVAS_HEIGHT - 50 - BALL_RADIUS - 5 || b.vy > -5) {
-        b.vy = BOUNCE_FORCE;
-        b.squash = 1.3;
-        playSound('bounce');
-      }
-    }
-  };
+            const createTrailParticle = (x, y) => {
+                trailParticles.current.push({ x, y, life: 20, size: BALL_RADIUS });
+            };
 
-  // Game loop
-  useEffect(() => {
-    if (gameState === 'playing') {
-      gameLoop.current = setInterval(() => {
-        update();
-        draw();
-      }, 1000 / 60);
-    }
-    
-    return () => {
-      if (gameLoop.current) clearInterval(gameLoop.current);
-    };
-  }, [gameState, level, lives, score, combo]);
+            const createScorePopup = (x, y, points, multiplier) => {
+                scorePopups.current.push({ x, y, text: multiplier > 1 ? `+${points} x${multiplier}` : `+${points}`, life: 60, vy: -2 });
+            };
 
-  // Start game
-  const startGame = () => {
-    setScore(0);
-    setLevel(1);
-    setLives(7);
-    setCombo(0);
-    initGame();
-    setGameState('playing');
-  };
+            const update = () => {
+                if (gameState !== 'playing') return;
+                const b = ball.current;
+                b.vy += GRAVITY;
+                b.y += b.vy;
+                b.rotation += gameSpeed.current * 0.1;
 
-  // Update high score on game over
-  useEffect(() => {
-    if (gameState === 'gameover' && score > highScore) {
-      setHighScore(score);
-      saveHighScore(score);
-    }
-  }, [gameState, score, highScore]);
+                if (Math.random() > 0.7) createTrailParticle(b.x, b.y);
 
-  // Draw menu screen
-  useEffect(() => {
-    if (gameState === 'menu' || gameState === 'gameover') {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      
-      const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-      gradient.addColorStop(0, '#C0FF00');
-      gradient.addColorStop(0.5, '#A0E000');
-      gradient.addColorStop(1, '#7AC600');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-      ctx.beginPath();
-      ctx.arc(100, 100, 80, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(CANVAS_WIDTH - 100, 150, 60, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(CANVAS_WIDTH / 2, CANVAS_HEIGHT - 80, 100, 0, Math.PI * 2);
-      ctx.fill();
-      
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-      ctx.shadowBlur = 10;
-      ctx.shadowOffsetX = 4;
-      ctx.shadowOffsetY = 4;
-      
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 56px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('BOUNCING BALL', CANVAS_WIDTH / 2, 120);
-      
-      ctx.font = 'bold 28px Arial';
-      ctx.fillStyle = '#FF6B6B';
-      ctx.fillText('🏏 Red Cricket Ball Adventure 🏏', CANVAS_WIDTH / 2, 165);
-      
-      ctx.shadowBlur = 0;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 0;
-      
-      if (gameState === 'gameover') {
-        ctx.font = 'bold 48px Arial';
-        ctx.fillStyle = '#FF3333';
-        ctx.fillText('GAME OVER', CANVAS_WIDTH / 2, 250);
-        
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-        ctx.fillRect(CANVAS_WIDTH / 2 - 220, 290, 440, 140);
-        ctx.strokeStyle = '#333';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(CANVAS_WIDTH / 2 - 220, 290, 440, 140);
-        
-        ctx.font = 'bold 32px Arial';
-        ctx.fillStyle = '#333';
-        ctx.fillText(`Final Score: ${score}`, CANVAS_WIDTH / 2, 330);
-        ctx.font = '26px Arial';
-        ctx.fillText(`Level Reached: ${level}`, CANVAS_WIDTH / 2, 365);
-        ctx.fillStyle = '#FF6B00';
-        ctx.fillText(`Best Combo: ${maxCombo}x`, CANVAS_WIDTH / 2, 400);
-        
-        if (score > highScore) {
-          ctx.fillStyle = '#FFD700';
-          ctx.font = 'bold 24px Arial';
-          ctx.fillText('🏆 NEW HIGH SCORE! 🏆', CANVAS_WIDTH / 2, 440);
-        }
-      } else {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-        ctx.fillRect(CANVAS_WIDTH / 2 - 280, 210, 560, 280);
-        ctx.strokeStyle = '#333';
-        ctx.lineWidth = 4;
-        ctx.strokeRect(CANVAS_WIDTH / 2 - 280, 210, 560, 280);
-        
-        ctx.font = 'bold 28px Arial';
-        ctx.fillStyle = '#FF6B00';
-        ctx.fillText('🎮 HOW TO PLAY 🎮', CANVAS_WIDTH / 2, 250);
-        
-        ctx.font = '22px Arial';
-        ctx.fillStyle = '#333';
-        ctx.textAlign = 'left';
-        const instructions = [
-          '✓ Click to bounce and avoid obstacles',
-          '✓ Collect coins for combo multipliers',
-          '✓ 🛡️ Shield protects from damage',
-          '✓ 🧲 Magnet attracts nearby coins',
-          '✓ Lives refill every 5 levels!'
-        ];
-        
-        instructions.forEach((text, i) => {
-          ctx.fillText(text, CANVAS_WIDTH / 2 - 250, 295 + i * 35);
-        });
-        
-        ctx.textAlign = 'center';
-        
-        if (highScore > 0) {
-          ctx.font = 'bold 18px Arial';
-          ctx.fillStyle = '#FFD700';
-          ctx.fillText(`🏆 High Score: ${highScore}`, CANVAS_WIDTH / 2, 465);
-        }
-      }
-    }
-  }, [gameState, score, level, highScore, maxCombo]);
+                if (b.y > CANVAS_HEIGHT - 50 - BALL_RADIUS) {
+                    b.y = CANVAS_HEIGHT - 50 - BALL_RADIUS;
+                    b.vy = 0;
+                    b.squash = 0.7;
+                } else {
+                    b.squash = Math.min(1, b.squash + 0.05);
+                }
 
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-lime-400 via-green-400 to-emerald-500 p-4">
-      <div className="mb-4 flex items-center justify-between w-full max-w-[800px] bg-white/90 rounded-xl p-4 shadow-lg">
-        <div className="text-gray-800 text-lg font-bold flex items-center gap-4">
-          <span>🏆 {score}</span>
-          <span>📊 Lv.{level}</span>
-          <span>❤️ {lives}</span>
-          {combo > 2 && <span className="text-yellow-600 animate-pulse">{Math.min(Math.floor(combo / 3) + 1, 5)}x</span>}
-        </div>
-        <div className="flex gap-2">
-          {highScore > 0 && (
-            <div className="flex items-center gap-1 px-3 py-1 bg-yellow-100 rounded-lg">
-              <Trophy size={18} className="text-yellow-600" />
-              <span className="text-sm font-bold text-yellow-700">{highScore}</span>
-            </div>
-          )}
-          <button
-            onClick={() => setSoundEnabled(!soundEnabled)}
-            className="p-2 bg-lime-600 hover:bg-lime-500 rounded-lg transition-colors shadow-md"
-          >
-            {soundEnabled ? <Volume2 className="text-white" /> : <VolumeX className="text-white" />}
-          </button>
-        </div>
-      </div>
-      
-      <div className="relative shadow-2xl rounded-xl overflow-hidden">
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          onClick={handleBounce}
-          className="border-8 border-white rounded-xl cursor-pointer"
-          style={{ maxWidth: '100%', height: 'auto' }}
-        />
-        
-        {gameState !== 'playing' && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <button
-              onClick={startGame}
-              className="flex items-center gap-3 px-10 py-5 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-400 hover:to-red-400 text-white text-3xl font-bold rounded-2xl shadow-2xl transition-all transform hover:scale-110 border-4 border-white"
-            >
-              <Play size={36} fill="white" />
-              {gameState === 'gameover' ? 'PLAY AGAIN' : 'START GAME'}
-            </button>
-          </div>
-        )}
-        
-        {gameState === 'playing' && (
-          <button
-            onClick={() => setGameState('paused')}
-            className="absolute top-4 right-4 p-3 bg-yellow-500 hover:bg-yellow-400 rounded-xl shadow-lg transition-all border-2 border-white"
-          >
-            <Pause className="text-white" size={28} />
-          </button>
-        )}
-        
-        {gameState === 'paused' && (
-          <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center backdrop-blur-sm">
-            <div className="text-center bg-white/95 p-10 rounded-2xl shadow-2xl">
-              <div className="text-gray-800 text-5xl font-bold mb-8">⏸️ PAUSED</div>
-              <button
-                onClick={() => setGameState('playing')}
-                className="flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-green-500 to-lime-500 hover:from-green-400 hover:to-lime-400 text-white text-2xl font-bold rounded-xl shadow-lg transition-all mx-auto transform hover:scale-105"
-              >
-                <Play size={28} fill="white" />
-                RESUME
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-      
-      <div className="mt-6 text-white text-base text-center max-w-[800px] bg-white/20 backdrop-blur-sm rounded-xl p-4 shadow-lg">
-        <p className="mb-2 font-bold text-lg">
-          🌍 <span className="text-yellow-200">{themes[currentTheme.current].name} Tunnel</span>
-        </p>
-        <p className="text-sm">✨ Collect coins in combos for huge multipliers! 🚀</p>
-      </div>
-    </div>
-  );
-};
+                if (shakeAmount.current > 0) shakeAmount.current -= 0.5;
+                if (comboTimer.current > 0) comboTimer.current--;
+                else if (combo > 0) setCombo(0);
+                if (activePowerup.current && powerupTimer.current > 0) powerupTimer.current--;
+                else if (activePowerup.current) activePowerup.current = null;
+                if (invincibilityTimer.current > 0) invincibilityTimer.current--;
 
-export default BouncingBallGame;
+                distance.current += gameSpeed.current;
+                const newLevel = Math.floor(distance.current / 3000) + 1;
+                if (newLevel > level) {
+                    setLevel(newLevel);
+                    playSound('levelup');
+                    gameSpeed.current = BASE_SPEED + (newLevel - 1) * 0.2;
+                    const newTheme = Math.floor((newLevel - 1) / 5) % themes.length;
+                    if (newTheme !== currentTheme.current) {
+                        setLives(7);
+                        currentTheme.current = newTheme;
+                        createParticles(b.x, b.y, '#00FF00', 20);
+                    }
+                }
+
+                obstacles.current = obstacles.current.filter(obs => {
+                    obs.x -= gameSpeed.current;
+                    if (obs.type === 'bomb') {
+                        obs.yOffset += obs.speed;
+                        if (Math.abs(obs.yOffset) > obs.range) obs.speed *= -1;
+                        obs.fuseGlow = (obs.fuseGlow + 0.15) % (Math.PI * 2);
+                    }
+                    const obsY = obs.y + (obs.yOffset || 0);
+                    if (obs.x < b.x + BALL_RADIUS && obs.x + obs.width > b.x - BALL_RADIUS &&
+                        obsY < b.y + BALL_RADIUS && obsY + obs.height > b.y - BALL_RADIUS) {
+                        if (obs.type !== 'water') {
+                            if (activePowerup.current === 'shield') {
+                                playSound('bounce', 1.5);
+                                createParticles(b.x, b.y, '#00FFFF', 15);
+                                return false;
+                            } else if (invincibilityTimer.current === 0) {
+                                playSound('hit');
+                                createParticles(b.x, b.y, '#FF0000');
+                                shakeAmount.current = 10;
+                                setCombo(0);
+                                comboTimer.current = 0;
+                                invincibilityTimer.current = 90;
+                                setLives(prev => {
+                                    const newLives = prev - 1;
+                                    if (newLives <= 0) {
+                                        setGameState('gameover');
+                                        return 0;
+                                    }
+                                    return newLives;
+                                });
+                                b.y = CANVAS_HEIGHT / 2;
+                                b.vy = 0;
+                                return false;
+                            }
+                        }
+                    }
+                    return obs.x > -obs.width;
+                });
+
+                if (obstacles.current.length < 5) generateObstacle(CANVAS_WIDTH + 200);
+
+                coins.current = coins.current.filter(coin => {
+                    coin.x -= gameSpeed.current;
+                    coin.sparkle = (coin.sparkle + 0.1) % (Math.PI * 2);
+                    if (!coin.collected) {
+                        const dx = coin.x - b.x;
+                        const dy = coin.y - b.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (activePowerup.current === 'magnet' && dist < 150) {
+                            coin.x += (b.x - coin.x) * 0.1;
+                            coin.y += (b.y - coin.y) * 0.1;
+                        }
+                        if (dist < BALL_RADIUS + coin.radius) {
+                            coin.collected = true;
+                            const newCombo = combo + 1;
+                            setCombo(newCombo);
+                            if (newCombo > maxCombo) setMaxCombo(newCombo);
+                            comboTimer.current = 120;
+                            const multiplier = Math.min(Math.floor(newCombo / 3) + 1, 5);
+                            const points = 10 * multiplier;
+                            playSound('coin', 1 + newCombo * 0.1);
+                            createParticles(coin.x, coin.y, '#FFD700');
+                            createScorePopup(coin.x, coin.y, 10, multiplier);
+                            setScore(prev => prev + points);
+                        }
+                    }
+                    return coin.x > -coin.radius && !coin.collected;
+                });
+
+                powerups.current = powerups.current.filter(powerup => {
+                    powerup.x -= gameSpeed.current;
+                    powerup.float = (powerup.float + 0.1) % (Math.PI * 2);
+                    if (!powerup.collected) {
+                        const dx = powerup.x - b.x;
+                        const dy = powerup.y - b.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < BALL_RADIUS + powerup.radius) {
+                            powerup.collected = true;
+                            activePowerup.current = powerup.type;
+                            powerupTimer.current = 300;
+                            playSound('powerup');
+                            createParticles(powerup.x, powerup.y, powerup.type === 'shield' ? '#00FFFF' : '#FF00FF', 15);
+                        }
+                    }
+                    return powerup.x > -powerup.radius && !powerup.collected;
+                });
+
+                particles.current = particles.current.filter(p => {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.vy += 0.3;
+                    p.life--;
+                    return p.life > 0;
+                });
+
+                trailParticles.current = trailParticles.current.filter(p => {
+                    p.life--;
+                    p.size -= 0.5;
+                    return p.life > 0 && p.size > 0;
+                });
+
+                scorePopups.current = scorePopups.current.filter(p => {
+                    p.y += p.vy;
+                    p.life--;
+                    return p.life > 0;
+                });
+            };
+
+            const draw = () => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                const theme = themes[currentTheme.current];
+
+                ctx.save();
+                if (shakeAmount.current > 0) {
+                    ctx.translate((Math.random() - 0.5) * shakeAmount.current, (Math.random() - 0.5) * shakeAmount.current);
+                }
+
+                const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+                gradient.addColorStop(0, theme.bg);
+                gradient.addColorStop(1, theme.accent);
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+                if (currentTheme.current === 2) {
+                    for (let i = 0; i < 5; i++) {
+                        const bubbleX = ((distance.current * 0.5 + i * 150) % CANVAS_WIDTH);
+                        const bubbleY = CANVAS_HEIGHT - 50 + Math.sin(distance.current * 0.05 + i) * 10;
+                        ctx.fillStyle = 'rgba(255, 69, 0, 0.3)';
+                        ctx.beginPath();
+                        ctx.arc(bubbleX, bubbleY, 15, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                } else if (currentTheme.current === 3) {
+                    for (let i = 0; i < 20; i++) {
+                        const snowX = ((distance.current * 0.3 + i * 40) % CANVAS_WIDTH);
+                        const snowY = ((distance.current * 0.5 + i * 30) % CANVAS_HEIGHT);
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+                        ctx.beginPath();
+                        ctx.arc(snowX, snowY, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+
+                ctx.fillStyle = theme.wall;
+                ctx.fillRect(0, 0, CANVAS_WIDTH, 50);
+                ctx.fillRect(0, CANVAS_HEIGHT - 50, CANVAS_WIDTH, 50);
+
+                ctx.strokeStyle = theme.accent;
+                ctx.lineWidth = 2;
+                for (let i = 0; i < 10; i++) {
+                    const x = (distance.current % 100) + i * 100;
+                    ctx.beginPath();
+                    ctx.moveTo(x, 50);
+                    ctx.lineTo(x, CANVAS_HEIGHT - 50);
+                    ctx.stroke();
+                }
+
+                trailParticles.current.forEach(p => {
+                    ctx.fillStyle = `rgba(255, 107, 107, ${p.life / 20 * 0.3})`;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                obstacles.current.forEach(obs => {
+                    const obsY = obs.y + (obs.yOffset || 0);
+                    if (obs.type === 'ground_spike') {
+                        ctx.fillStyle = obs.color;
+                        ctx.beginPath();
+                        for (let i = 0; i < 3; i++) {
+                            const baseX = obs.x + i * 20;
+                            ctx.moveTo(baseX, obsY + obs.height);
+                            ctx.lineTo(baseX + 10, obsY);
+                            ctx.lineTo(baseX + 20, obsY + obs.height);
+                        }
+                        ctx.fill();
+                    } else if (obs.type === 'water') {
+                        ctx.fillStyle = obs.color;
+                        ctx.globalAlpha = 0.6;
+                        ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+                        ctx.globalAlpha = 1;
+                    } else if (obs.type === 'bomb') {
+                        const centerX = obs.x + obs.width / 2;
+                        const centerY = obsY + obs.height / 2;
+                        ctx.fillStyle = '#1a1a1a';
+                        ctx.beginPath();
+                        ctx.arc(centerX, centerY, 22, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.fillStyle = '#FF0000';
+                        ctx.font = 'bold 16px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('💣', centerX, centerY);
+                    }
+                });
+
+                coins.current.forEach(coin => {
+                    ctx.fillStyle = '#FFD700';
+                    ctx.beginPath();
+                    ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                powerups.current.forEach(powerup => {
+                    const floatY = powerup.y + Math.sin(powerup.float) * 10;
+                    ctx.fillStyle = powerup.type === 'shield' ? '#00FFFF' : '#FF00FF';
+                    ctx.beginPath();
+                    ctx.arc(powerup.x, floatY, powerup.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.font = 'bold 20px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(powerup.type === 'shield' ? '🛡️' : '🧲', powerup.x, floatY);
+                });
+
+                particles.current.forEach(p => {
+                    ctx.fillStyle = p.color;
+                    ctx.globalAlpha = p.life / 30;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalAlpha = 1;
+                });
+
+                scorePopups.current.forEach(p => {
+                    ctx.fillStyle = '#FFD700';
+                    ctx.globalAlpha = p.life / 60;
+                    ctx.font = 'bold 20px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(p.text, p.x, p.y);
+                    ctx.globalAlpha = 1;
+                });
+
+                const b = ball.current;
+                ctx.save();
+                ctx.translate(b.x, b.y);
+                ctx.scale(1, b.squash);
+                ctx.rotate(b.rotation);
+
+                if (invincibilityTimer.current > 0 && Math.floor(invincibilityTimer.current / 10) % 2 === 0) {
+                    ctx.globalAlpha = 0.5;
+                }
+
+                const ballGrad = ctx.createRadialGradient(-5, -5, 5, 0, 0, BALL_RADIUS);
+                ballGrad.addColorStop(0, '#FF6B6B');
+                ballGrad.addColorStop(1, '#C92A2A');
+                ctx.fillStyle = ballGrad;
+                ctx.beginPath();
+                ctx.arc(0, 0, BALL_RADIUS, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.strokeStyle = '#8B0000';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(0, 0, BALL_RADIUS - 5, Math.PI * 0.3, Math.PI * 0.7);
+                ctx.stroke();
+
+                ctx.globalAlpha = 1;
+                ctx.restore();
+
+                if (combo > 2) {
+                    const multiplier = Math.min(Math.floor(combo / 3) + 1, 5);
+                    ctx.fillStyle = '#FFD700';
+                    ctx.font = 'bold 32px Arial';
+                    ctx.textAlign = 'left';
+                    ctx.fillText(`${multiplier}x COMBO!`, 20, 100);
+                }
+
+                if (activePowerup.current) {
+                    ctx.fillStyle = activePowerup.current === 'shield' ? '#00FFFF' : '#FF00FF';
+                    ctx.font = 'bold 20px Arial';
+                    ctx.textAlign = 'right';
+                    const powerupText = activePowerup.current === 'shield' ? '🛡️ SHIELD' : '🧲 MAGNET';
+                    ctx.fillText(powerupText, CANVAS_WIDTH - 20, 100);
+                }
+
+                const levelProgress = (distance.current % 3000) / 3000;
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                ctx.fillRect(50, CANVAS_HEIGHT - 30, CANVAS_WIDTH - 100, 15);
+                ctx.fillStyle = '#00FF00';
+                ctx.fillRect(50, CANVAS_HEIGHT - 30, (CANVAS_WIDTH - 100) * levelProgress, 15);
+
+                ctx.restore();
+            };
+
+            const handleBounce = () => {
+                if (gameState === 'playing') {
+                    const b = ball.current;
+                    if (b.y >= CANVAS_HEIGHT - 50 - BALL_RADIUS - 5 || b.vy > -5) {
+                        b.vy = BOUNCE_FORCE;
+                        b.squash = 1.3;
+                        playSound('bounce');
+                    }
+                }
+            };
+
+            useEffect(() => {
+                if (gameState === 'playing') {
+                    gameLoop.current = setInterval(() => {
+                        update();
+                        draw();
+                    }, 1000 / 60);
+                }
+                return () => {
+                    if (gameLoop.current) clearInterval(gameLoop.current);
+                };
+            }, [gameState, level, lives, score, combo]);
+
+            const startGame = () => {
+                setScore(0);
+                setLevel(1);
+                setLives(7);
+                setCombo(0);
+                initGame();
+                setGameState('playing');
+            };
+
+            useEffect(() => {
+                if (gameState === 'gameover' && score > highScore) {
+                    setHighScore(score);
+                    saveHighScore(score);
+                }
+            }, [gameState, score, highScore]);
+
+            useEffect(() => {
+                if (gameState === 'menu' || gameState === 'gameover') {
+                    const canvas = canvasRef.current;
+                    if (!canvas) return;
+                    const ctx = canvas.getContext('2d');
+                    const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+                    gradient.addColorStop(0, '#C0FF00');
+                    gradient.addColorStop(0.5, '#A0E000');
+                    gradient.addColorStop(1, '#7AC600');
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.font = 'bold 56px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('BOUNCING BALL', CANVAS_WIDTH / 2, 120);
+                    ctx.font = 'bold 28px Arial';
+                    ctx.fillStyle = '#FF6B6B';
+                    ctx.fillText('🏏 Red Cricket Ball Adventure 🏏', CANVAS_WIDTH / 2, 165);
+
+                    if (gameState === 'gameover') {
+                        ctx.font = 'bold 48px Arial';
+                        ctx.fillStyle = '#FF3333';
+                        ctx.fillText('GAME OVER', CANVAS_WIDTH / 2, 250);
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                        ctx.fillRect(CANVAS_WIDTH / 2 - 220, 290, 440, 140);
+                        ctx.font = 'bold 32px Arial';
+                        ctx.fillStyle = '#333';
+                        ctx.fillText(`Final Score: ${score}`, CANVAS_WIDTH / 2, 330);
+                        ctx.font = '26px Arial';
+                        ctx.fillText(`Level: ${level}`, CANVAS_WIDTH / 2, 365);
+                        ctx.fillStyle = '#FF6B00';
+                        ctx.fillText(`Best Combo: ${maxCombo}x`, CANVAS_WIDTH / 2, 400);
+                        if (score > highScore) {
+                            ctx.fillStyle = '#FFD700';
+                            ctx.font = 'bold 24px Arial';
+                            ctx.fillText('🏆 NEW HIGH SCORE! 🏆', CANVAS_WIDTH / 2, 440);
+                        }
+                    } else {
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+                        ctx.fillRect(CANVAS_WIDTH / 2 - 280, 210, 560, 280);
+                        ctx.font = 'bold 28px Arial';
+                        ctx.fillStyle = '#FF6B00';
+                        ctx.fillText('🎮 HOW TO PLAY 🎮', CANVAS_WIDTH / 2, 250);
+                        ctx.font = '22px Arial';
+                        ctx.fillStyle = '#333';
+                        ctx.textAlign = 'left';
+                        const instructions = [
+                            '✓ Click to bounce',
+                            '✓ Collect coins for combos',
+                            '✓ 🛡️ Shield protects you',
+                            '✓ 🧲 Magnet attracts coins',
+                            '✓ Lives refill every 5 levels!'
+                        ];
+                        instructions.forEach((text, i) => {
+                            ctx.fillText(text, CANVAS_WIDTH / 2 - 250, 295 + i * 35);
+                        });
+                        ctx.textAlign = 'center';
+                        if (highScore > 0) {
+                            ctx.font = 'bold 18px Arial';
+                            ctx.fillStyle = '#FFD700';
+                            ctx.fillText(`🏆 High Score: ${highScore}`, CANVAS_WIDTH / 2, 465);
+                        }
+                    }
+                }
+            }, [gameState, score, level, highScore, maxCombo]);
+
+            return (
+                <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minHeight: '100vh',
+                    background: 'linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%)',
+                    padding: '20px'
+                }}>
+                    <div style={{
+                        marginBottom: '20px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        width: '800px',
+                        maxWidth: '100%',
+                        background: 'rgba(255,255,255,0.9)',
+                        borderRadius: '12px',
+                        padding: '15px',
+                        boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+                    }}>
+                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#333', display: 'flex', gap: '15px' }}>
+                            <span>🏆 {score}</span>
+                            <span>📊 Lv.{level}</span>
+                            <span>❤️ {lives}</span>
+                            {combo > 2 && <span style={{ color: '#FFD700' }}>{Math.min(Math.floor(combo / 3) + 1, 5)}x</span>}
+                        </div>
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                            {highScore > 0 && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 12px', background: '#FFF3CD', borderRadius: '8px' }}>
+                                    <Trophy size={18} />
+                                    <span style={{ fontWeight: 'bold', color: '#856404' }}>{highScore}</span>
+                                </div>
+                            )}
+                            <button onClick={() => setSoundEnabled(!soundEnabled)} style={{
+                                padding: '10px',
+                                background: '#84fab0',
+                                border: 'none',
+                                borderRadius: '8px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                color: 'white'
+                            }}>
+                                {soundEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div style={{ position: 'relative', boxShadow: '0 20px 50px rgba(0,0,0,0.3)', borderRadius: '12px', overflow: 'hidden' }}>
+                        <canvas
+                            ref={canvasRef}
+                            width={CANVAS_WIDTH}
+                            height={CANVAS_HEIGHT}
+                            onClick={handleBounce}
+                            style={{ border: '8px solid white', borderRadius: '12px', cursor: 'pointer', display: 'block', maxWidth: '100%', height: 'auto' }}
+                        />
+
+                        {gameState !== 'playing' && (
+                            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <button onClick={startGame} style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '12px',
+                                    padding: '20px 40px',
+                                    background: 'linear-gradient(135deg, #FF6B6B 0%, #FF3333 100%)',
+                                    color: 'white',
+                                    fontSize: '32px',
+                                    fontWeight: 'bold',
+                                    border: '4px solid white',
+                                    borderRadius: '16px',
+                                    cursor: 'pointer',
+                                    boxShadow: '0 10px 30px rgba(0,0,0,0.3)',
+                                    transition: 'transform 0.2s'
+                                }} onMouseOver={(e) => e.target.style.transform = 'scale(1.1)'} onMouseOut={(e) => e.target.style.transform = 'scale(1)'}>
+                                    <Play size={36} fill="white" />
+                                    {gameState === 'gameover' ? 'PLAY AGAIN' : 'START GAME'}
+                                </button>
+                            </div>
+                        )}
+
+                        {gameState === 'playing' && (
+                            <button onClick={() => setGameState('paused')} style={{
+                                position: 'absolute',
+                                top: '16px',
+                                right: '16px',
+                                padding: '12px',
+                                background: '#FFC107',
+                                border: '2px solid white',
+                                borderRadius: '12px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                color: 'white'
+                            }}>
+                                <Pause size={28} />
+                            </button>
+                        )}
+
+                        {gameState === 'paused' && (
+                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <div style={{ textAlign: 'center', background: 'rgba(255,255,255,0.95)', padding: '40px', borderRadius: '16px' }}>
+                                    <div style={{ fontSize: '48px', fontWeight: 'bold', marginBottom: '32px', color: '#333' }}>⏸️ PAUSED</div>
+                                    <button onClick={() => setGameState('playing')} style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '12px',
+                                        padding: '16px 32px',
+                                        background: 'linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%)',
+                                        color: 'white',
+                                        fontSize: '24px',
+                                        fontWeight: 'bold',
+                                        border: 'none',
+                                        borderRadius: '12px',
+                                        cursor: 'pointer',
+                                        margin: '0 auto'
+                                    }}>
+                                        <Play size={28} fill="white" />
+                                        RESUME
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div style={{
+                        marginTop: '24px',
+                        textAlign: 'center',
+                        maxWidth: '800px',
+                        background: 'rgba(255,255,255,0.2)',
+                        padding: '16px',
+                        borderRadius: '12px',
+                        color: 'white'
+                    }}>
+                        <p style={{ fontWeight: 'bold', fontSize: '18px', marginBottom: '8px' }}>
+                            🌍 <span style={{ color: '#FFEB3B' }}>{themes[currentTheme.current].name} Tunnel</span>
+                        </p>
+                        <p style={{ fontSize: '14px' }}>✨ Collect coins in combos for huge multipliers! 🚀</p>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<BouncingBallGame />, document.getElementById('root'));
     </script>
 </body>
 </html>
